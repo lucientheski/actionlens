@@ -23,6 +23,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "blessed": "^0.1.81",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "dockerode": "^4.0.2",

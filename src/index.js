@@ -5,3 +5,5 @@ export { StepRunner } from './runner/step.js';
 export { ActionRunner } from './runner/actions.js';
 export { loadSecrets } from './secrets/loader.js';
 export { SessionRecorder } from './recorder/session.js';
+export { DebuggerApp } from './tui/app.js';
+export { Controller, State, StepStatus } from './tui/controller.js';

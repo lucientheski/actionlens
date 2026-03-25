@@ -6,6 +6,13 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { parseWorkflow } from '../src/parser/workflow.js';
+import { createExpressionContext } from '../src/parser/expressions.js';
+import { DockerRunner } from '../src/runner/docker.js';
+import { StepRunner } from '../src/runner/step.js';
+import { ActionRunner } from '../src/runner/actions.js';
+import { loadSecretsIsolated } from '../src/secrets/loader.js';
+import { SessionRecorder } from '../src/recorder/session.js';
+import { DebuggerApp } from '../src/tui/app.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8'));
@@ -29,24 +36,61 @@ program
       const content = readFileSync(resolve(workflowPath), 'utf-8');
       const workflow = parseWorkflow(content);
 
-      console.log(chalk.bold.cyan(`\n🔍 ActionLens — debugging: ${workflowPath}\n`));
-      console.log(chalk.dim(`Workflow: ${workflow.name}`));
-      console.log(chalk.dim(`Jobs: ${Object.keys(workflow.jobs).join(', ')}\n`));
-
-      // Phase 1: just list what would run
-      for (const [jobId, job] of Object.entries(workflow.jobs)) {
-        if (options.job && options.job !== jobId) continue;
-
-        console.log(chalk.bold.yellow(`Job: ${jobId}`) + chalk.dim(` (runs-on: ${job.runsOn})`));
-        for (const [i, step] of job.steps.entries()) {
-          const num = i + 1;
-          const label = step.name || step.run || step.uses || 'unnamed step';
-          console.log(chalk.green(`  ${num}. ${label}`));
-        }
-        console.log();
+      // Pick the job to debug
+      const jobIds = Object.keys(workflow.jobs);
+      const jobId = options.job || jobIds[0];
+      const job = workflow.jobs[jobId];
+      if (!job) {
+        console.error(chalk.red(`Job "${jobId}" not found. Available: ${jobIds.join(', ')}`));
+        process.exit(1);
       }
 
-      console.log(chalk.dim('Full Docker execution coming in Phase 2.'));
+      // Load secrets and build expression context
+      const secrets = loadSecretsIsolated(options.envFile);
+      const expressionContext = createExpressionContext({
+        env: { ...process.env, ...job.env, ...workflow.env },
+        secrets,
+        github: { event_name: 'workflow_dispatch', repository: process.cwd() },
+      });
+
+      // Set up Docker runner, step runner, action runner, recorder
+      const dockerRunner = new DockerRunner();
+      const stepRunner = new StepRunner(dockerRunner, expressionContext);
+      const actionRunner = new ActionRunner(dockerRunner);
+      const recorder = new SessionRecorder();
+      recorder.setWorkflow(workflow);
+      recorder.startJob(jobId);
+
+      // Set initial breakpoints from CLI
+      const breakpoints = options.breakpoint
+        ? options.breakpoint.split(',').map((n) => parseInt(n, 10) - 1)
+        : [];
+
+      // Launch TUI
+      const app = new DebuggerApp({
+        job: { ...job, id: jobId },
+        dockerRunner,
+        stepRunner,
+        actionRunner,
+        recorder,
+        expressionContext,
+      });
+
+      // Apply CLI breakpoints
+      for (const bp of breakpoints) {
+        app.controller.toggleBreakpoint(bp);
+      }
+
+      // If --step was given, advance selectedIndex
+      if (options.step) {
+        app.controller.selectedIndex = Math.max(0, parseInt(options.step, 10) - 1);
+      }
+
+      await app.run();
+
+      recorder.completeJob(jobId, true);
+      const sessionPath = recorder.save();
+      console.log(chalk.dim(`\nSession saved: ${sessionPath}`));
     } catch (err) {
       console.error(chalk.red(`Error: ${err.message}`));
       process.exit(1);
