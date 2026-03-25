@@ -1,0 +1,35 @@
+{
+  "name": "actionlens",
+  "version": "0.1.0",
+  "description": "Interactive CI pipeline debugger for GitHub Actions — debug workflows locally with Docker",
+  "type": "module",
+  "bin": {
+    "actionlens": "./bin/actionlens.js"
+  },
+  "main": "./src/index.js",
+  "scripts": {
+    "test": "vitest run",
+    "start": "node bin/actionlens.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "github-actions",
+    "ci",
+    "debugger",
+    "docker",
+    "workflow"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.4.5",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
+}
