@@ -80,5 +80,6 @@ export function normalizeStep(step, index) {
     workingDirectory: step['working-directory'] || null,
     shell: step.shell || null,
     continueOnError: step['continue-on-error'] || false,
+    timeoutMinutes: step['timeout-minutes'] || null,
   };
 }
