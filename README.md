@@ -1,22 +1,42 @@
 # ActionLens
 
-Interactive CI pipeline debugger for GitHub Actions. Debug workflows locally with Docker — step through steps, pause, inspect, shell in, set breakpoints, inject secrets — without pushing and waiting.
+**Stop the commit-push-wait-fail cycle.** Debug GitHub Actions workflows locally — step through steps, set breakpoints, shell into the container, inspect variables — before you push.
 
-## Status
+```
+actionlens run .github/workflows/ci.yml
+```
 
-**Phase 3** — Docker runner integration complete. The TUI is fully wired to Docker:
-- Workflow YAML parser with job/step normalization
-- Expression evaluator (`${{ env.*, secrets.*, github.*, steps.*.outputs.* }}`)
-- Docker container lifecycle: availability check, image pull with progress, container creation with workspace mount
-- Real-time streaming output from step execution
-- Action runner for `uses:` steps (clone, parse action.yml, execute)
-- Secrets loader from `.env` files
-- Session recorder for replay
+```
+┌─ Steps ──────────────────────────┐┌─ Output ──────────────────────────┐
+│ ✓ 1. Checkout code        [uses] ││ $ npm ci                          │
+│ ● 2. Install deps          [run] ││ added 243 packages in 4.2s       │
+│   3. Run tests             [run] ││                                   │
+│   4. Upload coverage      [uses] ││                                   │
+│                                  ││                                   │
+│ [R]un [S]kip [B]reakpoint [I]nto ││                                   │
+└──────────────────────────────────┘└───────────────────────────────────┘
+```
 
-## Prerequisites
+Step 2 is paused. You can inspect the container, check `node_modules`, modify env vars, then press `R` to continue. Or `I` to drop into a shell.
 
-- **Node.js** >= 18
-- **Docker** — Docker Desktop or Docker Engine must be running
+## Why not act / nektos?
+
+| | **ActionLens** | **act** (69k stars) | **PipeStep** (18 stars) | **breakpoint** (305 stars) |
+|---|---|---|---|---|
+| Step-through debugging | Yes | No — batch only | Yes | No |
+| `uses:` action execution | Yes — clones, parses action.yml, runs | Yes | No — `run:` only | N/A |
+| Expression evaluation | `${{ secrets.*, env.*, steps.*.outputs.* }}` | Yes | No | N/A |
+| Secrets from `.env` | Yes | Yes | No | N/A |
+| Shell into container | Yes, mid-step | No | No | Yes, on failure only |
+| Breakpoints | Yes | No | Yes | Reactive only |
+| Conditionals / `if:` | Yes | Yes | No | N/A |
+| Session recording | Yes | No | No | No |
+
+**act** is great for running workflows locally. But when a step fails, you're back to reading logs. There's no way to pause, inspect, and iterate.
+
+**PipeStep** has a similar TUI concept, but only handles `run:` steps. If your workflow uses `actions/checkout`, `actions/setup-node`, or any other `uses:` step, it can't run them.
+
+**breakpoint** lets you SSH into a GitHub Actions runner — but only after failure, and only on actual GitHub-hosted runners. It's reactive, not proactive.
 
 ## Install
 
@@ -24,50 +44,27 @@ Interactive CI pipeline debugger for GitHub Actions. Debug workflows locally wit
 npm install -g actionlens
 ```
 
+**Requires:** Node.js >= 18, Docker running (Docker Desktop or Engine)
+
 ## Usage
 
-### List workflow structure
-
 ```bash
+# List workflow structure
 actionlens list .github/workflows/ci.yml
-```
 
-Shows all jobs and steps with type indicators (`[run]` / `[uses]`).
-
-### Debug a workflow interactively
-
-```bash
+# Debug interactively
 actionlens run .github/workflows/ci.yml
-```
 
-This will:
-1. Parse the workflow YAML
-2. Check that Docker is running (clear error if not)
-3. Pull the Docker image (`ubuntu:22.04` for `ubuntu-latest`) with progress
-4. Create a container with your repo mounted at `/github/workspace`
-5. Launch the interactive TUI debugger
-
-### Run a specific job
-
-```bash
+# Target a specific job
 actionlens run .github/workflows/ci.yml --job build
-```
 
-### Start at a specific step
-
-```bash
+# Start at step 3
 actionlens run .github/workflows/ci.yml --step 3
-```
 
-### Set breakpoints from CLI
-
-```bash
+# Set breakpoints from CLI
 actionlens run .github/workflows/ci.yml --breakpoint 2,4
-```
 
-### Use a custom secrets file
-
-```bash
+# Custom secrets file
 actionlens run .github/workflows/ci.yml --env-file .env.local
 ```
 
@@ -80,37 +77,39 @@ actionlens run .github/workflows/ci.yml --env-file .env.local
 | `A` | Auto-run all remaining steps |
 | `N` | Run to next breakpoint |
 | `B` | Toggle breakpoint |
-| `I` | Shell into container (interactive bash) |
+| `I` | Shell into container |
 | `E` | View step environment variables |
 | `V` | View expression variables |
-| `↑/k` | Navigate up |
-| `↓/j` | Navigate down |
-| `Tab` | Switch focus (steps ↔ output) |
+| `↑/k` `↓/j` | Navigate steps |
+| `Tab` | Switch focus (steps / output) |
 | `Q` | Quit (cleans up container) |
 
 ## How it works
 
-1. **Parse** — Reads your `.github/workflows/*.yml` and normalizes jobs/steps
-2. **Docker** — Pulls the runner image and creates a container with your workspace mounted
-3. **Step-by-step** — Each step pauses for user input (`R` to run)
-4. **Execute** — `run:` steps execute via `docker exec` in the container
-5. **Stream** — Output streams to the TUI output panel in real-time
-6. **Record** — Results are captured in `.actionlens/recordings/` for replay
+1. **Parse** — Reads `.github/workflows/*.yml`, normalizes jobs and steps
+2. **Docker** — Pulls runner image, creates container with workspace mounted at `/github/workspace`
+3. **Pause** — Each step waits for input. `R` to run, `S` to skip, `I` to shell in
+4. **Execute** — `run:` steps via `docker exec`. `uses:` steps clone the action, parse `action.yml`, run it
+5. **Evaluate** — Expressions like `${{ steps.build.outputs.artifact }}` resolve from collected context
+6. **Record** — Results saved to `.actionlens/recordings/` for replay
 
-## Key Differentiator
+## Limitations
 
-Unlike other tools, ActionLens supports:
-- **Real `uses:` action execution** — clones action repos, parses action.yml, runs JS/composite/Docker actions
-- **Expression evaluation** — `${{ secrets.*, env.*, steps.*.outputs.* }}`
-- **Secrets injection** — from local `.env` file
-- **Real-time streaming** — stdout/stderr stream to the TUI as steps execute
-- **Session recording** — capture and replay step results
+This is **v0.1.0**. Be aware:
+
+- **Docker required** — no podman support yet
+- **Action toolkit shim** — covers common patterns but won't handle every edge case. Complex actions may need manual intervention (shell in with `I`)
+- **Matrix builds** — not yet supported (planned for v0.2)
+- **Artifact upload/download** — not yet supported (planned for v0.2)
+- **Runner environment** — uses `ubuntu:22.04`, not GitHub's full runner image. Some pre-installed tools may be missing
+
+If something doesn't work, you can always shell into the container and run it manually.
 
 ## Development
 
 ```bash
 npm install
-npm test
+npm test          # 146 tests
 ```
 
 ## License
