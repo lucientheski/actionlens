@@ -53,8 +53,59 @@ program
         github: { event_name: 'workflow_dispatch', repository: process.cwd() },
       });
 
-      // Set up Docker runner, step runner, action runner, recorder
+      // Set up Docker runner
       const dockerRunner = new DockerRunner();
+
+      // Check Docker is available before proceeding
+      const dockerAvailable = await dockerRunner.isAvailable();
+      if (!dockerAvailable) {
+        console.error(chalk.red('Error: Docker is not running.'));
+        console.error(chalk.yellow('ActionLens requires Docker to execute workflow steps locally.'));
+        console.error(chalk.yellow('Please start Docker Desktop or the Docker daemon and try again.'));
+        process.exit(1);
+      }
+
+      // Resolve workspace path (directory containing the workflow file)
+      const workspacePath = resolve(dirname(resolve(workflowPath)));
+      // Walk up to find repo root (directory containing .git), or use workflow dir
+      let repoRoot = workspacePath;
+      let dir = workspacePath;
+      while (dir !== '/') {
+        try {
+          const stat = readFileSync(resolve(dir, '.git/HEAD'), 'utf-8');
+          if (stat) { repoRoot = dir; break; }
+        } catch { /* keep going */ }
+        dir = dirname(dir);
+      }
+
+      // Pull image with progress indication
+      const runsOn = job.runsOn || 'ubuntu-latest';
+      const imageMap = {
+        'ubuntu-latest': 'ubuntu:22.04',
+        'ubuntu-22.04': 'ubuntu:22.04',
+        'ubuntu-20.04': 'ubuntu:20.04',
+      };
+      const image = imageMap[runsOn] || 'ubuntu:22.04';
+
+      console.log(chalk.cyan(`Pulling image ${image}...`));
+      await dockerRunner.pullImage(image, {
+        onProgress: ({ status, id }) => {
+          if (id) {
+            process.stdout.write(chalk.dim(`  ${id}: ${status}\r`));
+          }
+        },
+      });
+      console.log(chalk.green(`Image ${image} ready.`));
+
+      // Create container with workspace mounted
+      console.log(chalk.cyan(`Creating container (workspace: ${repoRoot})...`));
+      await dockerRunner.createContainer({
+        image,
+        env: { ...workflow.env, ...job.env },
+        binds: [`${repoRoot}:/github/workspace`],
+      });
+      console.log(chalk.green('Container started.'));
+
       const stepRunner = new StepRunner(dockerRunner, expressionContext);
       const actionRunner = new ActionRunner(dockerRunner);
       const recorder = new SessionRecorder();

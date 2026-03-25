@@ -74,6 +74,59 @@ export class Controller extends EventEmitter {
     this.emit('state', { from: old, to: newState });
   }
 
+  /**
+   * Initialize the Docker container for step execution.
+   * Pulls the image (with progress) and creates the container with workspace mounted.
+   *
+   * @param {object} [options]
+   * @param {string} [options.workspacePath] - Host path to mount as /github/workspace
+   * @param {string} [options.image] - Docker image to use
+   */
+  async initContainer(options = {}) {
+    if (!this.dockerRunner) return;
+
+    const runsOn = this.job.runsOn || 'ubuntu-latest';
+    const imageMap = {
+      'ubuntu-latest': 'ubuntu:22.04',
+      'ubuntu-22.04': 'ubuntu:22.04',
+      'ubuntu-20.04': 'ubuntu:20.04',
+    };
+    const image = options.image || imageMap[runsOn] || 'ubuntu:22.04';
+
+    // Check Docker availability
+    const available = await this.dockerRunner.isAvailable();
+    if (!available) {
+      throw new Error(
+        'Docker is not running. Please start Docker and try again.\n' +
+        'ActionLens requires Docker to execute workflow steps locally.'
+      );
+    }
+
+    // Pull image with progress
+    this.emit('output', `Pulling image ${image}...\n`);
+    await this.dockerRunner.pullImage(image, {
+      onProgress: ({ status, progress, id }) => {
+        const line = id ? `  ${id}: ${status} ${progress}` : `  ${status}`;
+        this.emit('pull:progress', line);
+      },
+    });
+    this.emit('output', `Image ${image} ready.\n`);
+
+    // Create container with workspace bind
+    const binds = [];
+    if (options.workspacePath) {
+      binds.push(`${options.workspacePath}:/github/workspace`);
+    }
+
+    await this.dockerRunner.createContainer({
+      image,
+      env: { ...this.expressionContext.env },
+      binds,
+    });
+
+    this.emit('output', 'Container started.\n');
+  }
+
   /** Start the debugger — transition from IDLE to WAITING. */
   start() {
     if (this.state !== State.IDLE) return;
@@ -138,7 +191,10 @@ export class Controller extends EventEmitter {
     try {
       let result;
       if (this.stepRunner) {
-        result = await this.stepRunner.run(step);
+        result = await this.stepRunner.run(step, {
+          onStdout: (chunk) => this.emit('output', chunk),
+          onStderr: (chunk) => this.emit('output', `{red-fg}${chunk}{/red-fg}`),
+        });
       } else {
         // No runner — simulate for testing
         result = { success: true, exitCode: 0, stdout: '', stderr: '', outputs: {}, skipped: false };
