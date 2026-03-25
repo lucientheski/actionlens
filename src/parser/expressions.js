@@ -25,8 +25,9 @@ export function createExpressionContext({
   steps = {},
   inputs = {},
   matrix = {},
+  needs = {},
 } = {}) {
-  return { env, secrets, github, steps, inputs, matrix };
+  return { env, secrets, github, steps, inputs, matrix, needs };
 }
 
 /**
