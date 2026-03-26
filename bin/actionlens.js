@@ -81,9 +81,10 @@ program
       // Pull image with progress indication
       const runsOn = job.runsOn || 'ubuntu-latest';
       const imageMap = {
-        'ubuntu-latest': 'ubuntu:22.04',
-        'ubuntu-22.04': 'ubuntu:22.04',
-        'ubuntu-20.04': 'ubuntu:20.04',
+        'ubuntu-latest': 'catthehacker/ubuntu:act-latest',
+        'ubuntu-24.04': 'catthehacker/ubuntu:act-latest',
+        'ubuntu-22.04': 'catthehacker/ubuntu:act-22.04',
+        'ubuntu-20.04': 'catthehacker/ubuntu:act-20.04',
       };
       const image = imageMap[runsOn] || 'ubuntu:22.04';
 
